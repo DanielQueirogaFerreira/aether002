@@ -94,6 +94,9 @@ export class LightField {
   private lastPart = "";
   private sprites: HTMLCanvasElement[] = [];
   private palette: Palette | null = null;
+  private fromRgb: [number, number, number][] = [];
+  private toRgb: [number, number, number][] = [];
+  private paletteMix = 1;
   private mode: Mode = "drift";
   private density = 62;
   private flow = 0.9;
@@ -131,8 +134,26 @@ export class LightField {
     this.trail = 0.14 - (cfg.trail / 100) * 0.12;
     this.paused = cfg.paused;
     if (!this.palette || this.palette.id !== cfg.palette.id) {
+      const nextRgb = cfg.palette.colors.map(hexToRgb);
+      if (this.toRgb.length) {
+        const t = this.paletteMix;
+        this.fromRgb = this.toRgb.map((c, i) => {
+          const a = this.fromRgb[i] ?? c;
+          return [
+            a[0] + (c[0] - a[0]) * t,
+            a[1] + (c[1] - a[1]) * t,
+            a[2] + (c[2] - a[2]) * t,
+          ];
+        });
+      } else {
+        this.fromRgb = nextRgb.map((c) => [...c] as [number, number, number]);
+      }
+      this.toRgb = nextRgb;
+      this.paletteMix = this.palette ? 0 : 1;
       this.palette = cfg.palette;
-      this.sprites = cfg.palette.colors.map((hex) => makeSprite(hexToRgb(hex)));
+      this.sprites = (this.paletteMix >= 1 ? nextRgb : this.fromRgb).map((rgb) =>
+        makeSprite(rgb),
+      );
     }
     this.ensureCount();
     if (switched) {
@@ -418,6 +439,18 @@ export class LightField {
 
   private step(dt: number) {
     this.resize();
+    if (this.paletteMix < 1 && this.toRgb.length) {
+      this.paletteMix = Math.min(1, this.paletteMix + dt / 1.5);
+      const t = this.paletteMix;
+      this.sprites = this.toRgb.map((c, i) => {
+        const a = this.fromRgb[i] ?? c;
+        return makeSprite([
+          a[0] + (c[0] - a[0]) * t,
+          a[1] + (c[1] - a[1]) * t,
+          a[2] + (c[2] - a[2]) * t,
+        ]);
+      });
+    }
     if (this.paused) {
       this.blit();
       return;

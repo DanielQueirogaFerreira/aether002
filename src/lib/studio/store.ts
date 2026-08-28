@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 import {
   MODES,
   PALETTES,
+  type CycleMode,
   type FieldConfig,
   type Mode,
   type PaletteId,
@@ -29,6 +30,9 @@ type StudioState = {
   panel: boolean;
   galleryOpen: boolean;
   shots: Snapshot[];
+  cycle: CycleMode;
+  cycleSec: number;
+  sequence: PaletteId[];
   start: () => void;
   setMode: (mode: Mode) => void;
   cycleMode: (dir: 1 | -1) => void;
@@ -47,6 +51,9 @@ type StudioState = {
   setChrome: (chrome: boolean) => void;
   setPanel: (panel: boolean) => void;
   setGalleryOpen: (open: boolean) => void;
+  setCycle: (cycle: CycleMode) => void;
+  setCycleSec: (n: number) => void;
+  toggleSequence: (id: PaletteId) => void;
   addShot: (shot: Snapshot) => void;
   removeShot: (id: string) => void;
   config: () => FieldConfig;
@@ -75,6 +82,9 @@ export const useStudio = create<StudioState>()(
       panel: false,
       galleryOpen: false,
       shots: [],
+      cycle: "hold",
+      cycleSec: 20,
+      sequence: PALETTES.map((p) => p.id),
       start: () => set({ started: true }),
       setMode: (mode) => set({ mode }),
       cycleMode: (dir) => {
@@ -103,6 +113,17 @@ export const useStudio = create<StudioState>()(
       setChrome: (chrome) => set({ chrome, panel: chrome ? get().panel : false }),
       setPanel: (panel) => set({ panel, chrome: panel ? true : get().chrome }),
       setGalleryOpen: (galleryOpen) => set({ galleryOpen }),
+      setCycle: (cycle) => set({ cycle }),
+      setCycleSec: (cycleSec) => set({ cycleSec: Math.max(5, Math.min(120, cycleSec)) }),
+      toggleSequence: (id) => {
+        const seq = get().sequence;
+        if (seq.includes(id)) {
+          if (seq.length <= 1) return;
+          set({ sequence: seq.filter((x) => x !== id) });
+        } else if (seq.length < 8) {
+          set({ sequence: [...seq, id] });
+        }
+      },
       addShot: (shot) =>
         set({
           shots: [shot, ...get().shots].slice(0, MAX_SHOTS),
@@ -133,6 +154,9 @@ export const useStudio = create<StudioState>()(
         volume: s.volume,
         loop: s.loop,
         sourceId: s.sourceId === "custom" ? "aether" : s.sourceId,
+        cycle: s.cycle,
+        cycleSec: s.cycleSec,
+        sequence: s.sequence,
         shots: s.shots,
       }),
     },

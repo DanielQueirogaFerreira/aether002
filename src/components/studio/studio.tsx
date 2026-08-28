@@ -5,6 +5,8 @@ import {
   Eye,
   EyeOff,
   ImageIcon,
+  Maximize2,
+  Minimize2,
   Pause,
   Play,
   Repeat,
@@ -31,17 +33,22 @@ import {
   setSoundVolume,
 } from "@/lib/studio/audio";
 import { useStudio } from "@/lib/studio/store";
-import { MODES, PALETTES, type Mode } from "@/lib/studio/types";
+import { MODES, PALETTES, type CycleMode, type Mode, type PaletteId } from "@/lib/studio/types";
 import { cn } from "@/lib/utils";
 
 export function Studio() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fieldRef = useRef<LightField | null>(null);
   const [flash, setFlash] = useState(false);
+  const [cinema, setCinema] = useState(false);
+  const wakeRef = useRef<WakeLockSentinel | null>(null);
 
   const started = useStudio((s) => s.started);
   const chrome = useStudio((s) => s.chrome);
   const galleryOpen = useStudio((s) => s.galleryOpen);
+  const cycle = useStudio((s) => s.cycle);
+  const cycleSec = useStudio((s) => s.cycleSec);
+  const sequenceKey = useStudio((s) => s.sequence.join(","));
 
   useEffect(() => {
     const el = canvasRef.current;
@@ -99,10 +106,6 @@ export function Studio() {
       if (e.key === "[" || e.key === "ArrowLeft") st.cycleMode(-1);
       if (e.key === "]" || e.key === "ArrowRight") st.cycleMode(1);
       if (e.key === "h" || e.key === "H") st.toggleChrome();
-      if (e.key === "F11") {
-        st.setChrome(false);
-        st.setPanel(false);
-      }
       if (e.key === "m" || e.key === "M") st.toggleSound();
       if (e.key === "g" || e.key === "G") st.setGalleryOpen(!st.galleryOpen);
       if (e.key === "r" || e.key === "R") fieldRef.current?.reset();
@@ -130,14 +133,60 @@ export function Studio() {
 
   useEffect(() => {
     const onFs = () => {
-      if (!document.fullscreenElement) return;
-      const st = useStudio.getState();
-      st.setChrome(false);
-      st.setPanel(false);
+      const on = Boolean(document.fullscreenElement);
+      setCinema(on);
+      if (!on) {
+        void wakeRef.current?.release().catch(() => {});
+        wakeRef.current = null;
+      }
     };
     document.addEventListener("fullscreenchange", onFs);
     return () => document.removeEventListener("fullscreenchange", onFs);
   }, []);
+
+  useEffect(() => {
+    if (!cinema) {
+      void wakeRef.current?.release().catch(() => {});
+      wakeRef.current = null;
+      return;
+    }
+    const grab = async () => {
+      try {
+        if ("wakeLock" in navigator && document.visibilityState === "visible") {
+          wakeRef.current = await navigator.wakeLock.request("screen");
+        }
+      } catch {
+        /* iOS / policy */
+      }
+    };
+    void grab();
+    const onVis = () => {
+      if (document.visibilityState === "visible") void grab();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [cinema]);
+
+  useEffect(() => {
+    if (cycle === "hold") return;
+    const tick = () => {
+      const s = useStudio.getState();
+      if (s.cycle === "hold" || !s.started) return;
+      if (s.cycle === "random") {
+        const pool = PALETTES.filter((p) => p.id !== s.paletteId);
+        const pick = pool[Math.floor(Math.random() * pool.length)];
+        if (pick) s.setPalette(pick.id);
+        return;
+      }
+      const seq = s.sequence.length ? s.sequence : PALETTES.map((p) => p.id);
+      const i = Math.max(0, seq.indexOf(s.paletteId));
+      s.setPalette(seq[(i + 1) % seq.length] ?? seq[0]!);
+    };
+    const id = window.setInterval(tick, cycleSec * 1000);
+    return () => window.clearInterval(id);
+  }, [cycle, cycleSec, sequenceKey]);
 
   function pointer(e: React.PointerEvent<HTMLCanvasElement>, active: boolean, down?: boolean) {
     const field = fieldRef.current;
@@ -150,6 +199,25 @@ export function Studio() {
       down ?? e.buttons > 0,
       active,
     );
+  }
+
+  async function toggleCinema() {
+    const root = document.documentElement as HTMLElement & {
+      webkitRequestFullscreen?: () => Promise<void> | void;
+    };
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+        setCinema(false);
+        return;
+      }
+      if (root.requestFullscreen) await root.requestFullscreen();
+      else root.webkitRequestFullscreen?.();
+      setCinema(true);
+    } catch {
+      setCinema((v) => !v);
+      toast(cinema ? "Cinema off" : "Cinema on — screen stays awake");
+    }
   }
 
   function capture() {
@@ -209,7 +277,13 @@ export function Studio() {
 
       {!started ? <StartGate /> : null}
       {started && chrome ? (
-        <Chrome onCapture={capture} onDownload={download} onReset={() => fieldRef.current?.reset()} />
+        <Chrome
+          cinema={cinema}
+          onCinema={() => void toggleCinema()}
+          onCapture={capture}
+          onDownload={download}
+          onReset={() => fieldRef.current?.reset()}
+        />
       ) : null}
       {started && !chrome ? (
         <button
@@ -217,7 +291,7 @@ export function Studio() {
           aria-label="Show controls"
           title="Show controls (H)"
           onClick={() => useStudio.getState().setChrome(true)}
-          className="pointer-events-auto absolute top-4 right-4 z-20 flex size-11 items-center justify-center rounded-md bg-surface/80 text-muted shadow-border transition-[background-color,color,opacity] duration-150 hover:bg-surface hover:text-fg sm:top-6 sm:right-6"
+          className="pointer-events-auto absolute top-[max(0.5rem,env(safe-area-inset-top))] right-3 z-20 flex size-8 items-center justify-center rounded-md bg-surface/80 text-muted shadow-border sm:top-6 sm:right-6 sm:size-11"
         >
           <Eye className="size-4" />
         </button>
@@ -274,10 +348,14 @@ function StartGate() {
 }
 
 function Chrome({
+  cinema,
+  onCinema,
   onCapture,
   onDownload,
   onReset,
 }: {
+  cinema: boolean;
+  onCinema: () => void;
   onCapture: () => void;
   onDownload: () => void;
   onReset: () => void;
@@ -295,15 +373,16 @@ function Chrome({
 
   return (
     <>
-      <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-3 p-4 pt-[max(1rem,env(safe-area-inset-top))] sm:p-6">
-        <div className="pointer-events-none">
-          <p className="font-display text-2xl leading-none text-fg italic">Aether</p>
+      <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-2 px-3 pt-[max(0.4rem,env(safe-area-inset-top))] sm:p-6">
+        <div className="pointer-events-none min-w-0">
+          <p className="font-display text-lg leading-none text-fg italic sm:text-2xl">Aether</p>
           <p className="mt-1 hidden text-xs text-muted sm:block">{current?.hint}</p>
         </div>
-        <div className="pointer-events-auto flex shrink-0 items-center gap-1">
+        <div className="pointer-events-auto flex shrink-0 items-center gap-0.5 sm:gap-1">
           <Button
             variant="quiet"
             size="icon"
+            className="size-8 [&_svg]:size-3.5 sm:size-11 sm:[&_svg]:size-4"
             aria-label={paused ? "Resume" : "Pause"}
             onClick={togglePaused}
           >
@@ -312,6 +391,7 @@ function Chrome({
           <Button
             variant="quiet"
             size="icon"
+            className="size-8 [&_svg]:size-3.5 sm:size-11 sm:[&_svg]:size-4"
             aria-label={sound ? "Mute" : "Sound"}
             onClick={() => {
               const turningOn = !useStudio.getState().sound;
@@ -321,13 +401,19 @@ function Chrome({
           >
             {sound ? <Volume2 /> : <VolumeX />}
           </Button>
-          <Button variant="quiet" size="icon" aria-label="Save frame" onClick={onCapture}>
+          <Button
+            variant="quiet"
+            size="icon"
+            className="size-8 [&_svg]:size-3.5 sm:size-11 sm:[&_svg]:size-4"
+            aria-label="Save frame"
+            onClick={onCapture}
+          >
             <Camera />
           </Button>
           <Button
             variant="quiet"
             size="icon"
-            className="hidden sm:inline-flex"
+            className="hidden size-8 [&_svg]:size-3.5 sm:inline-flex sm:size-11 sm:[&_svg]:size-4"
             aria-label="Download"
             onClick={onDownload}
           >
@@ -336,6 +422,7 @@ function Chrome({
           <Button
             variant="quiet"
             size="icon"
+            className="size-8 [&_svg]:size-3.5 sm:size-11 sm:[&_svg]:size-4"
             aria-label="Gallery"
             onClick={() => setGalleryOpen(true)}
           >
@@ -351,7 +438,10 @@ function Chrome({
             size="icon"
             aria-label={panel ? "Hide field" : "Field"}
             title={panel ? "Hide field" : "Field"}
-            className={panel ? "bg-fg/10 text-fg" : undefined}
+            className={cn(
+              "size-8 [&_svg]:size-3.5 sm:size-11 sm:[&_svg]:size-4",
+              panel && "bg-fg/10 text-fg",
+            )}
             onClick={togglePanel}
           >
             <SlidersHorizontal />
@@ -359,6 +449,17 @@ function Chrome({
           <Button
             variant="quiet"
             size="icon"
+            className="size-8 [&_svg]:size-3.5 sm:size-11 sm:[&_svg]:size-4"
+            aria-label={cinema ? "Exit fullscreen" : "Fullscreen"}
+            title={cinema ? "Exit fullscreen" : "Fullscreen"}
+            onClick={onCinema}
+          >
+            {cinema ? <Minimize2 /> : <Maximize2 />}
+          </Button>
+          <Button
+            variant="quiet"
+            size="icon"
+            className="size-8 [&_svg]:size-3.5 sm:size-11 sm:[&_svg]:size-4"
             aria-label="Hide controls"
             title="Hide controls (H)"
             onClick={() => useStudio.getState().setChrome(false)}
@@ -377,27 +478,27 @@ function Chrome({
         <PanelBody onReset={onReset} />
       </aside>
 
-      <nav className={cn(
-        "pointer-events-auto absolute inset-x-0 bottom-0 z-20 flex gap-1 overflow-x-auto px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:hidden",
-        panel && "invisible",
-      )}>
+      <nav className="pointer-events-auto absolute inset-x-0 bottom-0 z-20 grid grid-cols-4 gap-1 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:flex sm:flex-wrap sm:justify-start sm:gap-1">
         {MODES.map((m, i) => (
           <button
             key={m.id}
             type="button"
             onClick={() => useStudio.getState().setMode(m.id)}
             className={cn(
-              "h-11 shrink-0 rounded-md px-3.5 text-sm font-medium transition-[background-color,color] duration-150",
+              "h-8 min-w-0 rounded-md px-1.5 text-[11px] font-medium transition-[background-color,color] duration-150 sm:h-10 sm:px-3 sm:text-sm",
               mode === m.id ? "bg-accent text-accent-fg" : "bg-surface/90 text-muted",
             )}
           >
-            {i + 1} {m.label}
+            <span className="sm:hidden">{m.label}</span>
+            <span className="hidden sm:inline">
+              {i + 1} {m.label}
+            </span>
           </button>
         ))}
       </nav>
 
       {panel ? (
-        <div className="pointer-events-auto absolute inset-x-0 bottom-0 z-30 md:hidden">
+        <div className="pointer-events-auto absolute inset-x-0 bottom-16 z-30 md:hidden">
           <button
             type="button"
             aria-label="Close controls"
@@ -422,6 +523,8 @@ function Chrome({
 function PanelBody({ onReset, compact = false }: { onReset: () => void; compact?: boolean }) {
   const mode = useStudio((s) => s.mode);
   const paletteId = useStudio((s) => s.paletteId);
+  const cycle = useStudio((s) => s.cycle);
+  const sequence = useStudio((s) => s.sequence);
   const density = useStudio((s) => s.density);
   const flow = useStudio((s) => s.flow);
   const trail = useStudio((s) => s.trail);
@@ -483,19 +586,30 @@ function PanelBody({ onReset, compact = false }: { onReset: () => void; compact?
               type="button"
               aria-label={p.label}
               title={p.label}
-              onClick={() => setPalette(p.id)}
+              onClick={() => {
+                const st = useStudio.getState();
+                if (st.cycle === "sequence") st.toggleSequence(p.id);
+                else st.setPalette(p.id);
+              }}
               className={cn(
-                "relative size-11 rounded-full transition-[box-shadow,transform] duration-150 ease-out active:scale-[0.96]",
+                "relative size-9 rounded-full transition-[box-shadow,transform] duration-150 ease-out active:scale-[0.96] sm:size-11",
                 paletteId === p.id ? "shadow-border-hover" : "shadow-border",
+                cycle === "sequence" && !sequence.includes(p.id) && "opacity-35",
               )}
             >
               <span
                 className="absolute inset-1 rounded-full"
                 style={{ background: p.colors[1] }}
               />
+              {cycle === "sequence" ? (
+                <span className="absolute -right-0.5 -bottom-0.5 flex size-4 items-center justify-center rounded-full bg-bg text-[9px] text-fg">
+                  {sequence.indexOf(p.id) >= 0 ? sequence.indexOf(p.id) + 1 : ""}
+                </span>
+              ) : null}
             </button>
           ))}
         </div>
+        <PaletteCycle />
       </div>
 
       <FieldSlider label="Density" value={density} onChange={setDensity} />
@@ -508,6 +622,49 @@ function PanelBody({ onReset, compact = false }: { onReset: () => void; compact?
           Clear
         </Button>
       </div>
+    </div>
+  );
+}
+
+function PaletteCycle() {
+  const cycle = useStudio((s) => s.cycle);
+  const cycleSec = useStudio((s) => s.cycleSec);
+  const setCycle = useStudio((s) => s.setCycle);
+  const setCycleSec = useStudio((s) => s.setCycleSec);
+  const modes: { id: CycleMode; label: string }[] = [
+    { id: "hold", label: "Hold" },
+    { id: "random", label: "Random" },
+    { id: "sequence", label: "Sequence" },
+  ];
+  return (
+    <div className="mt-3">
+      <div className="grid grid-cols-3 gap-1">
+        {modes.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            onClick={() => setCycle(m.id)}
+            className={cn(
+              "h-8 rounded-sm text-[11px] font-medium sm:h-11 sm:text-sm",
+              cycle === m.id ? "bg-accent text-accent-fg" : "text-muted hover:bg-fg/10 hover:text-fg",
+            )}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+      {cycle !== "hold" ? (
+        <div className="mt-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-medium tracking-wide text-muted uppercase">Seconds</p>
+            <p className="font-mono text-xs tabular-nums text-subtle">{cycleSec}</p>
+          </div>
+          <Slider value={cycleSec} min={5} max={120} onValueChange={setCycleSec} />
+        </div>
+      ) : null}
+      {cycle === "sequence" ? (
+        <p className="mt-2 text-[11px] text-subtle">Tap swatches to build the loop. Order is tap order.</p>
+      ) : null}
     </div>
   );
 }

@@ -33,6 +33,8 @@ export type Snapshot = {
 
 export type SoundSource = "aether" | "field" | "custom";
 
+export type CycleMode = "hold" | "random" | "sequence";
+
 export type FieldConfig = {
   mode: Mode;
   palette: Palette;
