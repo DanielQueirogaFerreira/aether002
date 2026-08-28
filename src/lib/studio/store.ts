@@ -54,6 +54,20 @@ type StudioState = {
   setCycle: (cycle: CycleMode) => void;
   setCycleSec: (n: number) => void;
   toggleSequence: (id: PaletteId) => void;
+  pinHash: string;
+  lockEnterFs: boolean;
+  lockExitFs: boolean;
+  lockHide: boolean;
+  lockShow: boolean;
+  setPin: (pin: string) => void;
+  clearPin: () => void;
+  setLock: (
+    key: "lockEnterFs" | "lockExitFs" | "lockHide" | "lockShow",
+    on: boolean,
+  ) => void;
+  setFreePanel: () => void;
+  setLockAll: () => void;
+  pinOk: (pin: string) => boolean;
   addShot: (shot: Snapshot) => void;
   removeShot: (id: string) => void;
   config: () => FieldConfig;
@@ -61,6 +75,16 @@ type StudioState = {
 
 function paletteById(id: PaletteId) {
   return PALETTES.find((p) => p.id === id) ?? PALETTES[0];
+}
+
+export function hashPin(pin: string) {
+  let h = 2166136261;
+  const s = `aether-kiosk:${pin}`;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16);
 }
 
 export const useStudio = create<StudioState>()(
@@ -85,6 +109,11 @@ export const useStudio = create<StudioState>()(
       cycle: "hold",
       cycleSec: 20,
       sequence: PALETTES.map((p) => p.id),
+      pinHash: "",
+      lockEnterFs: false,
+      lockExitFs: false,
+      lockHide: false,
+      lockShow: false,
       start: () => set({ started: true }),
       setMode: (mode) => set({ mode }),
       cycleMode: (dir) => {
@@ -124,6 +153,36 @@ export const useStudio = create<StudioState>()(
           set({ sequence: [...seq, id] });
         }
       },
+      setPin: (pin) => set({ pinHash: hashPin(pin) }),
+      clearPin: () =>
+        set({
+          pinHash: "",
+          lockEnterFs: false,
+          lockExitFs: false,
+          lockHide: false,
+          lockShow: false,
+        }),
+      setLock: (key, on) => {
+        if (on && !get().pinHash) return;
+        set({ [key]: on });
+      },
+      setFreePanel: () =>
+        set({
+          lockEnterFs: false,
+          lockExitFs: false,
+          lockHide: false,
+          lockShow: false,
+        }),
+      setLockAll: () => {
+        if (!get().pinHash) return;
+        set({
+          lockEnterFs: true,
+          lockExitFs: true,
+          lockHide: true,
+          lockShow: true,
+        });
+      },
+      pinOk: (pin) => Boolean(get().pinHash) && get().pinHash === hashPin(pin),
       addShot: (shot) =>
         set({
           shots: [shot, ...get().shots].slice(0, MAX_SHOTS),
@@ -157,6 +216,11 @@ export const useStudio = create<StudioState>()(
         cycle: s.cycle,
         cycleSec: s.cycleSec,
         sequence: s.sequence,
+        pinHash: s.pinHash,
+        lockEnterFs: s.lockEnterFs,
+        lockExitFs: s.lockExitFs,
+        lockHide: s.lockHide,
+        lockShow: s.lockShow,
         shots: s.shots,
       }),
     },

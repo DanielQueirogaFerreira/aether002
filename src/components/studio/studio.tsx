@@ -5,6 +5,7 @@ import {
   Eye,
   EyeOff,
   ImageIcon,
+  Lock,
   Maximize2,
   Minimize2,
   Pause,
@@ -41,7 +42,9 @@ export function Studio() {
   const fieldRef = useRef<LightField | null>(null);
   const [flash, setFlash] = useState(false);
   const [cinema, setCinema] = useState(false);
+  const [pinAsk, setPinAsk] = useState<null | { title: string; onOk: () => void }>(null);
   const wakeRef = useRef<WakeLockSentinel | null>(null);
+  const allowExitRef = useRef(false);
 
   const started = useStudio((s) => s.started);
   const chrome = useStudio((s) => s.chrome);
@@ -105,7 +108,11 @@ export function Studio() {
       }
       if (e.key === "[" || e.key === "ArrowLeft") st.cycleMode(-1);
       if (e.key === "]" || e.key === "ArrowRight") st.cycleMode(1);
-      if (e.key === "h" || e.key === "H") st.toggleChrome();
+      if (e.key === "h" || e.key === "H") {
+        e.preventDefault();
+        requestChrome(!st.chrome);
+        return;
+      }
       if (e.key === "m" || e.key === "M") st.toggleSound();
       if (e.key === "g" || e.key === "G") st.setGalleryOpen(!st.galleryOpen);
       if (e.key === "r" || e.key === "R") fieldRef.current?.reset();
@@ -135,9 +142,25 @@ export function Studio() {
     const onFs = () => {
       const on = Boolean(document.fullscreenElement);
       setCinema(on);
-      if (!on) {
-        void wakeRef.current?.release().catch(() => {});
-        wakeRef.current = null;
+      if (on) return;
+      void wakeRef.current?.release().catch(() => {});
+      wakeRef.current = null;
+      const s = useStudio.getState();
+      if (allowExitRef.current) {
+        allowExitRef.current = false;
+        return;
+      }
+      if (s.lockExitFs && s.pinHash) {
+        const root = document.documentElement;
+        void root.requestFullscreen?.().catch(() => {});
+        setPinAsk({
+          title: "Exit fullscreen",
+          onOk: () => {
+            allowExitRef.current = true;
+            void document.exitFullscreen?.().catch(() => {});
+            setCinema(false);
+          },
+        });
       }
     };
     document.addEventListener("fullscreenchange", onFs);
@@ -201,23 +224,45 @@ export function Studio() {
     );
   }
 
+  function requestChrome(next: boolean) {
+    const s = useStudio.getState();
+    const gated = next ? s.lockShow : s.lockHide;
+    const go = () => s.setChrome(next);
+    if (gated && s.pinHash) {
+      setPinAsk({ title: next ? "Show controls" : "Hide controls", onOk: go });
+      return;
+    }
+    go();
+  }
+
   async function toggleCinema() {
     const root = document.documentElement as HTMLElement & {
       webkitRequestFullscreen?: () => Promise<void> | void;
     };
-    try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
-        setCinema(false);
-        return;
+    const s = useStudio.getState();
+    const entering = !document.fullscreenElement && !cinema;
+    const gated = entering ? s.lockEnterFs : s.lockExitFs;
+    const go = async () => {
+      try {
+        if (document.fullscreenElement || cinema) {
+          allowExitRef.current = true;
+          if (document.fullscreenElement) await document.exitFullscreen();
+          setCinema(false);
+          return;
+        }
+        if (root.requestFullscreen) await root.requestFullscreen();
+        else root.webkitRequestFullscreen?.();
+        setCinema(true);
+      } catch {
+        setCinema((v) => !v);
+        toast(cinema ? "Cinema off" : "Cinema on — screen stays awake");
       }
-      if (root.requestFullscreen) await root.requestFullscreen();
-      else root.webkitRequestFullscreen?.();
-      setCinema(true);
-    } catch {
-      setCinema((v) => !v);
-      toast(cinema ? "Cinema off" : "Cinema on — screen stays awake");
+    };
+    if (gated && s.pinHash) {
+      setPinAsk({ title: entering ? "Enter fullscreen" : "Exit fullscreen", onOk: () => void go() });
+      return;
     }
+    await go();
   }
 
   function capture() {
@@ -280,6 +325,7 @@ export function Studio() {
         <Chrome
           cinema={cinema}
           onCinema={() => void toggleCinema()}
+          onHide={() => requestChrome(false)}
           onCapture={capture}
           onDownload={download}
           onReset={() => fieldRef.current?.reset()}
@@ -290,13 +336,26 @@ export function Studio() {
           type="button"
           aria-label="Show controls"
           title="Show controls (H)"
-          onClick={() => useStudio.getState().setChrome(true)}
+          onClick={() => requestChrome(true)}
           className="pointer-events-auto absolute top-[max(0.5rem,env(safe-area-inset-top))] right-3 z-20 flex size-8 items-center justify-center rounded-md bg-surface/80 text-muted shadow-border sm:top-6 sm:right-6 sm:size-11"
         >
           <Eye className="size-4" />
         </button>
       ) : null}
       {galleryOpen ? <Gallery /> : null}
+      {pinAsk ? (
+        <PinPad
+          title={pinAsk.title}
+          onCancel={() => setPinAsk(null)}
+          onOk={(pin) => {
+            if (!useStudio.getState().pinOk(pin)) return false;
+            const fn = pinAsk.onOk;
+            setPinAsk(null);
+            fn();
+            return true;
+          }}
+        />
+      ) : null}
 
       <Toaster
         theme="dark"
@@ -350,12 +409,14 @@ function StartGate() {
 function Chrome({
   cinema,
   onCinema,
+  onHide,
   onCapture,
   onDownload,
   onReset,
 }: {
   cinema: boolean;
   onCinema: () => void;
+  onHide: () => void;
   onCapture: () => void;
   onDownload: () => void;
   onReset: () => void;
@@ -462,7 +523,7 @@ function Chrome({
             className="size-8 [&_svg]:size-3.5 sm:size-11 sm:[&_svg]:size-4"
             aria-label="Hide controls"
             title="Hide controls (H)"
-            onClick={() => useStudio.getState().setChrome(false)}
+            onClick={onHide}
           >
             <EyeOff />
           </Button>
@@ -557,6 +618,8 @@ function PanelBody({ onReset, compact = false }: { onReset: () => void; compact?
 
       <SoundPanel compact={compact} />
 
+      <LockPanel />
+
       <div>
         <p className="mb-2 text-xs font-medium tracking-wide text-muted uppercase">Wind</p>
         <div className={cn("grid gap-1", compact ? "grid-cols-4" : "grid-cols-1")}>
@@ -621,6 +684,239 @@ function PanelBody({ onReset, compact = false }: { onReset: () => void; compact?
           <RotateCcw />
           Clear
         </Button>
+      </div>
+    </div>
+  );
+}
+
+function LockPanel() {
+  const pinHash = useStudio((s) => s.pinHash);
+  const lockEnterFs = useStudio((s) => s.lockEnterFs);
+  const lockExitFs = useStudio((s) => s.lockExitFs);
+  const lockHide = useStudio((s) => s.lockHide);
+  const lockShow = useStudio((s) => s.lockShow);
+  const [mode, setMode] = useState<"idle" | "set" | "confirm" | "change">("idle");
+  const [draft, setDraft] = useState("");
+  const hasPin = Boolean(pinHash);
+  const free = !lockEnterFs && !lockExitFs && !lockHide && !lockShow;
+
+  return (
+    <div>
+      <p className="mb-2 text-xs font-medium tracking-wide text-muted uppercase">Lock</p>
+      <div className="mb-2 grid grid-cols-2 gap-1">
+        <button
+          type="button"
+          onClick={() => useStudio.getState().setFreePanel()}
+          className={cn(
+            "h-8 rounded-sm text-[11px] font-medium sm:h-10 sm:text-sm",
+            free ? "bg-accent text-accent-fg" : "text-muted hover:bg-fg/10 hover:text-fg",
+          )}
+        >
+          Free panel
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            if (!hasPin) {
+              setMode("set");
+              setDraft("");
+              return;
+            }
+            useStudio.getState().setLockAll();
+          }}
+          className={cn(
+            "h-8 rounded-sm text-[11px] font-medium sm:h-10 sm:text-sm",
+            hasPin && !free && lockEnterFs && lockExitFs && lockHide && lockShow
+              ? "bg-accent text-accent-fg"
+              : "text-muted hover:bg-fg/10 hover:text-fg",
+          )}
+        >
+          Lock all
+        </button>
+      </div>
+
+      {(
+        [
+          ["lockEnterFs", "Enter fullscreen"],
+          ["lockExitFs", "Exit fullscreen"],
+          ["lockHide", "Hide controls"],
+          ["lockShow", "Show controls"],
+        ] as const
+      ).map(([key, label]) => {
+        const on =
+          key === "lockEnterFs"
+            ? lockEnterFs
+            : key === "lockExitFs"
+              ? lockExitFs
+              : key === "lockHide"
+                ? lockHide
+                : lockShow;
+        return (
+          <button
+            key={key}
+            type="button"
+            onClick={() => {
+              if (!hasPin) {
+                setMode("set");
+                setDraft("");
+                return;
+              }
+              useStudio.getState().setLock(key, !on);
+            }}
+            className="mb-1 flex h-8 w-full items-center justify-between rounded-sm px-2 text-left text-[11px] sm:h-10 sm:text-sm"
+          >
+            <span className={on ? "text-fg" : "text-muted"}>{label}</span>
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                on ? "bg-accent text-accent-fg" : "bg-fg/10 text-muted",
+              )}
+            >
+              {on ? "PIN" : "Free"}
+            </span>
+          </button>
+        );
+      })}
+
+      <div className="mt-2 flex gap-1">
+        <button
+          type="button"
+          onClick={() => {
+            setMode(hasPin ? "change" : "set");
+            setDraft("");
+          }}
+          className="h-8 flex-1 rounded-sm text-[11px] text-muted hover:bg-fg/10 hover:text-fg sm:h-10 sm:text-sm"
+        >
+          {hasPin ? "Change PIN" : "Set 4-digit PIN"}
+        </button>
+        {hasPin ? (
+          <button
+            type="button"
+            onClick={() => {
+              useStudio.getState().clearPin();
+              toast("Lock reset on this device");
+            }}
+            className="h-8 flex-1 rounded-sm text-[11px] text-muted hover:bg-fg/10 hover:text-fg sm:h-10 sm:text-sm"
+          >
+            Reset device
+          </button>
+        ) : null}
+      </div>
+      <p className="mt-2 text-[11px] text-subtle">
+        PIN stays on this device. Free panel never asks. Lock all is the usual kiosk.
+      </p>
+
+      {mode !== "idle" ? (
+        <PinPad
+          title={
+            mode === "confirm" ? "Repeat PIN" : mode === "change" ? "New PIN" : "Choose a 4-digit PIN"
+          }
+          onCancel={() => {
+            setMode("idle");
+            setDraft("");
+          }}
+          onOk={(pin) => {
+            if (mode === "set" || mode === "change") {
+              setDraft(pin);
+              setMode("confirm");
+              return true;
+            }
+            if (pin !== draft) {
+              toast("PINs did not match");
+              setMode("set");
+              setDraft("");
+              return false;
+            }
+            useStudio.getState().setPin(pin);
+            setMode("idle");
+            setDraft("");
+            toast("PIN saved");
+            return true;
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function PinPad({
+  title,
+  onCancel,
+  onOk,
+}: {
+  title: string;
+  onCancel: () => void;
+  onOk: (pin: string) => boolean;
+}) {
+  const [pin, setPin] = useState("");
+  const [bad, setBad] = useState(false);
+
+  function push(d: string) {
+    if (pin.length >= 4) return;
+    const next = pin + d;
+    setPin(next);
+    if (next.length === 4) {
+      window.setTimeout(() => {
+        const ok = onOk(next);
+        if (!ok) {
+          setBad(true);
+          window.setTimeout(() => {
+            setBad(false);
+            setPin("");
+          }, 280);
+        } else {
+          setPin("");
+        }
+      }, 40);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-bg/70 p-4 sm:items-center">
+      <button type="button" className="absolute inset-0" aria-label="Cancel" onClick={onCancel} />
+      <div
+        role="dialog"
+        aria-label={title}
+        className={cn(
+          "relative z-10 w-full max-w-xs rounded-xl bg-surface p-4 shadow-border",
+          bad && "animate-pulse",
+        )}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <p className="inline-flex items-center gap-2 text-sm font-medium">
+            <Lock className="size-3.5" />
+            {title}
+          </p>
+          <Button variant="ghost" size="icon-sm" aria-label="Cancel" onClick={onCancel}>
+            <X />
+          </Button>
+        </div>
+        <div className="mb-3 flex justify-center gap-2">
+          {[0, 1, 2, 3].map((i) => (
+            <span
+              key={i}
+              className={cn(
+                "size-2.5 rounded-full",
+                i < pin.length ? "bg-accent" : "bg-fg/20",
+              )}
+            />
+          ))}
+        </div>
+        <div className="grid grid-cols-3 gap-1">
+          {["1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0"].map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => {
+                if (k === "⌫") setPin((p) => p.slice(0, -1));
+                else push(k);
+              }}
+              className="h-11 rounded-sm text-sm font-medium text-fg hover:bg-fg/10"
+            >
+              {k}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
