@@ -850,10 +850,14 @@ function PinPad({
 }) {
   const [pin, setPin] = useState("");
   const [bad, setBad] = useState(false);
+  const pinRef = useRef("");
+  pinRef.current = pin;
 
   function push(d: string) {
-    if (pin.length >= 4) return;
-    const next = pin + d;
+    const cur = pinRef.current;
+    if (cur.length >= 4) return;
+    const next = cur + d;
+    pinRef.current = next;
     setPin(next);
     if (next.length === 4) {
       window.setTimeout(() => {
@@ -862,14 +866,44 @@ function PinPad({
           setBad(true);
           window.setTimeout(() => {
             setBad(false);
+            pinRef.current = "";
             setPin("");
           }, 280);
         } else {
+          pinRef.current = "";
           setPin("");
         }
       }, 40);
     }
   }
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const k = e.key;
+      if (k === "Escape") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        onCancel();
+        return;
+      }
+      if (k === "Backspace") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        pinRef.current = pinRef.current.slice(0, -1);
+        setPin(pinRef.current);
+        return;
+      }
+      const digit = k.length === 1 && k >= "0" && k <= "9" ? k : "";
+      if (digit) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        push(digit);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [onCancel, onOk]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-bg/70 p-4 sm:items-center">
