@@ -2,11 +2,11 @@
 
 Paint with light. A full-screen particle field — drag to stir, seven winds, Form and Nerve as glimpses in the pool.
 
-- **Studio (full app):** https://leaf-storm-jolly-frost.grok.me
-- **GitHub Pages (field + enter):** https://danielqueirogaferreira.github.io/aether002/
+- **GitHub Pages (this repo, live field):** https://danielqueirogaferreira.github.io/aether002/
+- **Grok:** https://leaf-storm-jolly-frost.grok.me
 - **Source:** https://github.com/DanielQueirogaFerreira/aether002
 
-GitHub Pages only serves static files. The README you saw at github.io was this file. The Pages site in `docs/` is the living field; the full studio (winds, Form, Nerve, sound, lock) is the published Grok app.
+The github.io site is the studio itself (static build). It does not redirect to Grok. Cloudflare, if connected to this repo, builds from `main`.
 
 ## Run locally
 
@@ -15,7 +15,7 @@ npm install
 npm run dev
 ```
 
-Enter field, then Field for palettes, sound, density.
+Enter field, then Field for palettes, sound, density, lock.
 
 ## Winds
 
