@@ -2,7 +2,7 @@
 
 import type { Mode, SoundSource } from "./types";
 
-export const AETHER_TRACK = "/audio/ethereal.mp3";
+export const AETHER_TRACK = `${import.meta.env.BASE_URL}audio/ethereal.mp3`;
 
 type Voice = {
   pads: number[];

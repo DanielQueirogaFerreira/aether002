@@ -146,6 +146,7 @@ function authPopupPlugin(): Plugin {
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
 export default defineConfig(({ command, isPreview }) => ({
+  base: process.env.BASE_PATH || "/",
   server: {
     host: "0.0.0.0",
     port: 8080,
@@ -170,11 +171,9 @@ export default defineConfig(({ command, isPreview }) => ({
     ...(command === "build" || isPreview
       ? [
           nitro({
-            preset: "vercel",
-            // Auto-registers server/middleware/* (the PWA install page +
-            // manifest + head-tag middleware). Nitro v3 defaults serverDir to
-            // false, so removing this silently unwires /?install=1 on deploys.
-            serverDir: "./server",
+            preset: process.env.NITRO_PRESET || "vercel",
+            serverDir:
+              process.env.NITRO_PRESET === "github-pages" ? false : "./server",
           }),
         ]
       : []),

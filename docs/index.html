@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aether</title>
+    <meta name="theme-color" content="#09090b" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #07070a;
+        color: #e8e4dc;
+        font-family: Figtree, system-ui, sans-serif;
+        overflow: hidden;
+      }
+      canvas {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      .hud {
+        position: fixed;
+        inset: auto 0 0 0;
+        padding: 28px 20px calc(24px + env(safe-area-inset-bottom));
+        text-align: center;
+        pointer-events: none;
+        background: linear-gradient(transparent, rgba(7, 7, 10, 0.72));
+      }
+      .kicker {
+        letter-spacing: 0.28em;
+        font-size: 10px;
+        text-transform: uppercase;
+        opacity: 0.55;
+      }
+      h1 {
+        font-family: "Instrument Serif", serif;
+        font-weight: 400;
+        font-size: clamp(42px, 10vw, 72px);
+        margin: 6px 0 10px;
+        font-style: italic;
+      }
+      p {
+        margin: 0 auto 18px;
+        max-width: 28rem;
+        font-size: 14px;
+        line-height: 1.45;
+        opacity: 0.72;
+      }
+      .row {
+        pointer-events: auto;
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+      a {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        padding: 0 18px;
+        border-radius: 999px;
+        text-decoration: none;
+        font-size: 14px;
+        font-weight: 500;
+      }
+      .enter {
+        background: #e8e4dc;
+        color: #111;
+      }
+      .src {
+        background: transparent;
+        color: #e8e4dc;
+        border: 1px solid rgba(232, 228, 220, 0.28);
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div class="hud">
+      <div class="kicker">Live field</div>
+      <h1>Aether</h1>
+      <p>Paint with light. This GitHub page is the field itself. The full studio — winds, Form, Nerve, sound — lives on the published site.</p>
+      <div class="row">
+        <a class="enter" href="https://leaf-storm-jolly-frost.grok.me">Enter studio</a>
+        <a class="src" href="https://github.com/DanielQueirogaFerreira/aether002">Source</a>
+      </div>
+    </div>
+    <script>
+      const LIVE = "https://leaf-storm-jolly-frost.grok.me";
+      const c = document.getElementById("c");
+      const x = c.getContext("2d");
+      const N = 420;
+      const pts = [];
+      let w = 0,
+        h = 0,
+        px = 0,
+        py = 0,
+        down = false;
+      function resize() {
+        w = c.width = innerWidth * devicePixelRatio;
+        h = c.height = innerHeight * devicePixelRatio;
+        c.style.width = innerWidth + "px";
+        c.style.height = innerHeight + "px";
+        x.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+      }
+      function seed() {
+        pts.length = 0;
+        for (let i = 0; i < N; i++) {
+          pts.push({
+            x: Math.random() * innerWidth,
+            y: Math.random() * innerHeight,
+            vx: 0,
+            vy: 0,
+            s: 0.4 + Math.random() * 1.8,
+          });
+        }
+      }
+      addEventListener("resize", () => {
+        resize();
+      });
+      addEventListener("pointerdown", (e) => {
+        down = true;
+        px = e.clientX;
+        py = e.clientY;
+      });
+      addEventListener("pointerup", () => {
+        down = false;
+      });
+      addEventListener("pointermove", (e) => {
+        px = e.clientX;
+        py = e.clientY;
+      });
+      let t = 0;
+      function tick() {
+        t += 0.004;
+        x.fillStyle = "rgba(7,7,10,0.18)";
+        x.fillRect(0, 0, innerWidth, innerHeight);
+        x.globalCompositeOperation = "lighter";
+        for (const p of pts) {
+          const a = Math.sin(p.x * 0.004 + t) + Math.cos(p.y * 0.003 - t);
+          p.vx += Math.cos(a) * 0.04;
+          p.vy += Math.sin(a * 1.3) * 0.04;
+          if (down) {
+            const dx = px - p.x,
+              dy = py - p.y,
+              d = Math.hypot(dx, dy) + 40;
+            p.vx += (dx / d) * 0.35;
+            p.vy += (dy / d) * 0.35;
+          }
+          p.vx *= 0.96;
+          p.vy *= 0.96;
+          p.x += p.vx;
+          p.y += p.vy;
+          if (p.x < 0) p.x += innerWidth;
+          if (p.x > innerWidth) p.x -= innerWidth;
+          if (p.y < 0) p.y += innerHeight;
+          if (p.y > innerHeight) p.y -= innerHeight;
+          x.fillStyle = "rgba(255,146,64,0.55)";
+          x.beginPath();
+          x.arc(p.x, p.y, p.s, 0, Math.PI * 2);
+          x.fill();
+        }
+        x.globalCompositeOperation = "source-over";
+        requestAnimationFrame(tick);
+      }
+      resize();
+      seed();
+      tick();
+    </script>
+  </body>
+</html>
